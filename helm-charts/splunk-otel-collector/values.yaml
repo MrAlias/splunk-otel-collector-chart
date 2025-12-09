@@ -1103,6 +1103,125 @@ targetAllocator:
     filter_strategy: relabel-config
 
 ################################################################################
+# OpenTelemetry eBPF Instrumentation (OBI)
+# Notice: OBI related features should be considered to have a beta maturity level.
+#
+# The OpenTelemetry eBPF Instrumentation running as a daemonset on Linux nodes.
+# It automatically instruments applications with eBPF to emit distributed traces,
+# metrics, and RED metrics without requiring code changes or application restarts.
+# Prerequisites:
+#   - Linux-only (kernel 4.x+ with eBPF support)
+#   - Requires privileged containers
+#   - Either gateway or agent must be enabled for telemetry routing
+#   - clusterName must be set
+# Unsupported distributions: eks/fargate, gke/autopilot
+# Related documentation: https://opentelemetry.io/docs/instrumentation/go/resources/
+# For OBI configuration details: https://github.com/open-telemetry/ebpf-instrumentation-poc
+################################################################################
+
+obi:
+  # Set to true to enable OpenTelemetry eBPF Instrumentation
+  # NOTE: This requires either gateway or agent to be enabled for telemetry routing
+  # NOTE: clusterName must be set
+  enabled: false
+
+  image:
+    # The registry and name of the OBI image to use
+    repository: otel/ebpf-instrument
+    # The tag of the OBI image. Leave empty to use the latest stable version.
+    # For production deployments, it is recommended to pin to a specific version, e.g., "v0.3.0"
+    # Examples of version tags: v0.3.0, v0.2.0, etc.
+    tag: ""
+    # The policy that specifies when the OBI image should be pulled
+    pullPolicy: IfNotPresent
+
+  resources:
+    limits:
+      # OBI requires significant CPU for instrumentation of all processes
+      cpu: 500m
+      # Recommended memory limit for OBI instrumentation
+      memory: 512Mi
+    requests:
+      # Recommended CPU request for OBI
+      cpu: 200m
+      # Recommended memory request for OBI
+      memory: 256Mi
+    # If you need to adjust resources, uncomment and customize the values above.
+    # Typical production values depend on the number of processes and pods being instrumented.
+    # Uncomment and adjust based on your workload:
+    # limits:
+    #   cpu: 1000m
+    #   memory: 1Gi
+    # requests:
+    #   cpu: 500m
+    #   memory: 512Mi
+
+  # Security context for OBI container
+  securityContext:
+    # OBI must run as root to instrument processes via eBPF
+    runAsUser: 0
+    # Read-only filesystem is recommended for security
+    readOnlyRootFilesystem: true
+    # OBI requires privileged mode to access kernel instrumentation hooks
+    privileged: true
+
+  # Tolerations to schedule OBI on nodes with taints
+  tolerations:
+    - effect: NoSchedule
+      operator: Exists
+    - effect: NoExecute
+      operator: Exists
+
+  # OBI discovery and instrumentation configuration
+  config:
+    # Service discovery configuration - by default instruments all services
+    discovery:
+      services:
+        - k8s_owner_name: .
+
+    # Patterns for pods to exclude from instrumentation
+    # Prevents instrumentation of system and collector components
+    exclude_instrument:
+      # Exclude collector pods to prevent telemetry feedback loops
+      - "*splunk-otel-collector*"
+      # Exclude OBI pods themselves
+      - "*obi*"
+
+    # Route configuration for request tracing
+    routes:
+      # HTTP paths to ignore for tracing
+      ignored_patterns:
+        - /health
+        - /ready
+      # Default routing strategy for unmatched routes
+      unmatched: heuristic
+
+  # Environment variables for OBI configuration
+  env:
+    # OBI telemetry output format
+    OTEL_EBPF_TRACE_PRINTER: "text"
+    # OBI metrics collection features
+    OTEL_EBPF_METRIC_FEATURES: "application,application_span,application_service_graph"
+    # Context propagation mode for correlating traces across services
+    OTEL_EBPF_BPF_CONTEXT_PROPAGATION: "all"
+    # Log level for OBI diagnostics
+    OTEL_EBPF_LOG_LEVEL: "INFO"
+    # Enable debug logging for eBPF subsystem (set to "FALSE" for production)
+    OTEL_EBPF_BPF_DEBUG: "FALSE"
+    # Profile port for OBI internal metrics
+    OTEL_EBPF_PROFILE_PORT: "6060"
+    # Instrumentation target setting (instrument all processes)
+    OTEL_EBPF_TRACES_INSTRUMENTATIONS: "*"
+    # Batch timeout for trace batching
+    OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT: "10s"
+    # Metrics collection interval
+    OTEL_EBPF_METRICS_INTERVAL: "30s"
+    # Route harvester timeout
+    OTEL_EBPF_ROUTE_HARVESTER_TIMEOUT: "10s"
+    # Additional custom environment variables can be added here
+    # CUSTOM_VAR: "value"
+
+################################################################################
 # Helm Chart Feature Gates.
 # The following feature gates are used to enable/disable features in the Helm chart
 # that are not yet ready for general availability.

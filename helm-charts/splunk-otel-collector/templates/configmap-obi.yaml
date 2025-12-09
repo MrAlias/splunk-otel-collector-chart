@@ -1,0 +1,40 @@
+{{- if include "splunk-otel-collector.obiEnabled" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "splunk-otel-collector.obiFullname" . }}-config
+  namespace: {{ include "splunk-otel-collector.namespace" . }}
+  labels:
+    {{- include "splunk-otel-collector.obiLabels" . | nindent 4 }}
+data:
+  obi-config.yml: |
+    discovery:
+      services:
+{{- if .Values.obi.config.discovery.services }}
+{{- toYaml .Values.obi.config.discovery.services | nindent 8 }}
+{{- else }}
+        - k8s_owner_name: .
+{{- end }}
+    exclude_instrument:
+{{- if .Values.obi.config.exclude_instrument }}
+{{- range .Values.obi.config.exclude_instrument }}
+      - "{{ . }}"
+{{- end }}
+{{- else }}
+      # Exclude collector pods to prevent telemetry feedback loops
+      - "*{{ include "splunk-otel-collector.fullname" . }}*"
+      # Exclude OBI pods themselves
+      - "*{{ include "splunk-otel-collector.obiFullname" . }}*"
+{{- end }}
+    routes:
+      ignored_patterns:
+{{- if .Values.obi.config.routes.ignored_patterns }}
+{{- range .Values.obi.config.routes.ignored_patterns }}
+        - {{ . }}
+{{- end }}
+{{- else }}
+        - /health
+        - /ready
+{{- end }}
+      unmatched: {{ .Values.obi.config.routes.unmatched | default "heuristic" }}
+{{- end }}

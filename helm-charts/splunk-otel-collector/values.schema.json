@@ -1338,6 +1338,120 @@
         }
       }
     },
+    "obi": {
+      "description": "OpenTelemetry eBPF Instrumentation (OBI) configuration for automatic distributed tracing and metrics collection.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Enable OpenTelemetry eBPF Instrumentation",
+          "type": "boolean"
+        },
+        "image": {
+          "description": "OBI container image configuration",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": {
+              "description": "OBI image repository",
+              "type": "string"
+            },
+            "tag": {
+              "description": "OBI image tag (empty defaults to latest)",
+              "type": "string"
+            },
+            "pullPolicy": {
+              "description": "OBI image pull policy",
+              "type": "string",
+              "enum": ["IfNotPresent", "Always", "Never"]
+            }
+          }
+        },
+        "resources": {
+          "description": "OBI resource requests and limits",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "limits": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "requests": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "tolerations": {
+          "description": "OBI pod tolerations",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "nodeSelector": {
+          "description": "OBI pod node selector",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "affinity": {
+          "description": "OBI pod affinity",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "securityContext": {
+          "description": "OBI container security context",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "podAnnotations": {
+          "description": "OBI pod annotations",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "config": {
+          "description": "OBI configuration for service discovery and instrumentation",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "discovery": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "exclude_instrument": {
+              "description": "Pod name patterns to exclude from instrumentation",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "routes": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "env": {
+          "description": "OBI environment variables",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "serviceAccount": {
+          "description": "OBI service account configuration",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
     "featureGates": {
       "description": "Helm Chart Feature Gates.",
       "type": "object",

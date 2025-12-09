@@ -1,5 +1,143 @@
 # Upgrade guidelines
 
+## Enabling OpenTelemetry eBPF Instrumentation (OBI)
+
+### Prerequisites
+
+Before enabling OBI, ensure your cluster meets these requirements:
+
+1. **Linux-only Deployment**: OBI uses eBPF, which is only available on Linux. All worker nodes must run Linux.
+   - Verify with: `kubectl get nodes -L kubernetes.io/os`
+   - Windows nodes are not supported
+
+2. **Kernel Version**: Kubernetes nodes must run Linux kernel 4.x or later with eBPF support
+   - Verify kernel support:
+     ```bash
+     uname -r
+     cat /boot/config-$(uname -r) | grep CONFIG_BPF
+     # Should show: CONFIG_BPF=y and CONFIG_HAVE_EBPF_JIT=y
+     ```
+
+3. **Distribution Compatibility**: OBI is not supported on:
+   - **EKS Fargate**: Fargate doesn't support privileged containers required by OBI
+   - **GKE Autopilot**: Autopilot restricts privileged containers
+
+4. **Privileged Containers**: Cluster must allow privileged containers
+   - Check pod security policies: `kubectl get psp`
+   - Verify no policies block `privileged: true` and `hostPID: true`
+
+5. **Cluster Name**: Must be configured for proper telemetry identification
+   - Set via: `clusterName: my-cluster` in values
+
+### Installation Steps
+
+1. **Update your values.yaml** to enable OBI:
+
+```yaml
+# Required: Set cluster name for telemetry identification
+clusterName: my-cluster
+
+# Enable agent (required for OBI data routing)
+agent:
+  enabled: true
+
+# Enable OBI
+obi:
+  enabled: true
+  image:
+    # Optionally pin to a specific version (recommended for production)
+    # tag: "v0.3.0"
+```
+
+2. **Verify agent/gateway is enabled** (OBI requires one for telemetry routing):
+
+```yaml
+# One of these must be true:
+agent:
+  enabled: true    # Default mode - local agent on each node
+
+# OR for large clusters:
+gateway:
+  enabled: true    # Centralized collector gateway
+```
+
+3. **Upgrade the Helm release**:
+
+```bash
+helm upgrade splunk-otel-collector splunk-otel-collector-chart/splunk-otel-collector \
+  --namespace splunk-monitoring \
+  -f your-values.yaml
+```
+
+4. **Verify OBI deployment**:
+
+```bash
+# Check OBI daemonset
+kubectl -n splunk-monitoring get daemonset splunk-otel-collector-obi
+
+# View OBI pods
+kubectl -n splunk-monitoring get pods -l app=splunk-otel-collector-obi
+
+# Check logs
+kubectl -n splunk-monitoring logs -l app=splunk-otel-collector-obi --tail=20
+```
+
+### Configuration Options
+
+```yaml
+obi:
+  enabled: true
+  
+  image:
+    repository: otel/ebpf-instrument
+    tag: "v0.3.0"          # Pin version (recommended) or leave empty for latest
+    pullPolicy: IfNotPresent
+  
+  resources:
+    limits:
+      cpu: 500m            # Adjust based on workload complexity
+      memory: 512Mi
+    requests:
+      cpu: 200m
+      memory: 256Mi
+  
+  securityContext:
+    runAsUser: 0           # Must run as root
+    privileged: true       # Required for eBPF
+    readOnlyRootFilesystem: true
+  
+  # Service discovery and exclusion patterns
+  config:
+    exclude_instrument:
+      - "*splunk-otel-collector*"  # Exclude collector to prevent feedback loops
+      - "*obi*"
+  
+  # Environment variables for OBI behavior
+  env:
+    OTEL_EBPF_LOG_LEVEL: "INFO"
+    OTEL_EBPF_METRIC_FEATURES: "application,application_span,application_service_graph"
+```
+
+### Troubleshooting OBI Enablement
+
+**Symptom**: OBI pods stay in `Pending` or `CrashLoopBackOff`
+
+- Check kernel support: `uname -r` and verify eBPF enabled
+- Check pod security policies: `kubectl describe pod <obi-pod>`
+- View logs: `kubectl logs <obi-pod>`
+
+**Symptom**: No OBI data appearing in Splunk
+
+- Verify agent/gateway is running: `kubectl get pods -l app=splunk-otel-collector-agent`
+- Check network connectivity between OBI and agent
+- Verify OTLP ports (4317/4318) are open
+
+**Symptom**: High CPU or memory usage
+
+- OBI resource usage scales with the number of instrumented processes
+- Adjust resource limits based on actual consumption: `kubectl top pod`
+- Consider filtering services in `obi.config.exclude_instrument`
+
 ## 0.137.0 to 0.138.0
 
 ### Fluentd sidecar has been removed

@@ -1,0 +1,17 @@
+{{- if and .Values.rbac.create (include "splunk-otel-collector.obiEnabled" .) }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "splunk-otel-collector.obiRoleBindingName" . }}
+  namespace: {{ include "splunk-otel-collector.namespace" . }}
+  labels:
+    {{- include "splunk-otel-collector.obiLabels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "splunk-otel-collector.obiServiceAccountName" . }}
+    namespace: {{ include "splunk-otel-collector.namespace" . }}
+roleRef:
+  kind: Role
+  name: {{ include "splunk-otel-collector.obiRoleName" . }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

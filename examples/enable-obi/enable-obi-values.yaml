@@ -1,0 +1,31 @@
+# Minimal example to enable OpenTelemetry eBPF Instrumentation (OBI)
+# along with the default Splunk OpenTelemetry Collector
+
+# Required: Cluster name for telemetry identification
+clusterName: my-cluster
+
+# Splunk Observability configuration
+splunkObservability:
+  realm: us0
+  accessToken: ${SPLUNK_ACCESS_TOKEN}
+
+# Enable agent for telemetry collection and routing
+agent:
+  enabled: true
+
+# Enable OpenTelemetry eBPF Instrumentation
+# OBI automatically instruments applications with eBPF for distributed traces and RED metrics
+obi:
+  enabled: true
+  image:
+    repository: otel/ebpf-instrument
+    # tag: "v0.3.0"  # Uncomment to pin to a specific version (recommended for production)
+    # Empty tag defaults to latest
+  # Resource configuration for OBI daemonset
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 200m
+      memory: 256Mi

@@ -4,6 +4,21 @@
 <!-- For unreleased changes, see entries in .chloggen -->
 <!-- next version -->
 
+## [Unreleased]
+
+### 🎉 New Features 🎉
+
+- `obi`: Added OpenTelemetry eBPF Instrumentation (OBI) support as an optional DaemonSet component for automatic distributed tracing and RED metrics collection. OBI provides eBPF-based instrumentation without requiring code changes or application restarts. ([#XXXX](https://github.com/signalfx/splunk-otel-collector-chart/pull/XXXX))
+  - OBI automatically collects distributed traces, metrics, and application performance data using kernel-level instrumentation
+  - New Helm values under `obi.*` to configure OBI deployment with sensible defaults
+  - Separate RBAC resources for OBI with appropriate permissions for pod instrumentation and workload discovery
+  - Automatic OTLP receiver configuration when OBI is enabled for collecting instrumentation data
+  - OBI pods automatically excluded from collector log collection to prevent circular telemetry
+  - Example configuration in `examples/enable-obi/` demonstrating typical usage patterns
+  - Prerequisites and configuration documentation included
+  - **Limitations**: OBI is disabled on unsupported distributions (`eks/fargate`, `gke/autopilot`). Requires Linux nodes with eBPF kernel support and privileged containers.
+  - **Breaking Changes**: None. OBI is disabled by default and opt-in.
+
 ## [0.140.0] - 2025-11-21
 
 This Splunk OpenTelemetry Collector for Kubernetes release adopts the [Splunk OpenTelemetry Collector v0.140.0](https://github.com/signalfx/splunk-otel-collector/releases/tag/v0.140.0).

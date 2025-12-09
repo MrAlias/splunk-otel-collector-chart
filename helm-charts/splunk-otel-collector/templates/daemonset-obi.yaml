@@ -1,0 +1,88 @@
+{{- if include "splunk-otel-collector.obiEnabled" . }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "splunk-otel-collector.obiFullname" . }}
+  namespace: {{ include "splunk-otel-collector.namespace" . }}
+  labels:
+    {{- include "splunk-otel-collector.obiLabels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "splunk-otel-collector.obiSelectorLabels" . | nindent 6 }}
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        {{- include "splunk-otel-collector.obiSelectorLabels" . | nindent 8 }}
+      {{- with .Values.obi.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "splunk-otel-collector.obiServiceAccountName" . }}
+      # OBI requires host PID namespace to discover all monitored processes
+      hostPID: true
+      # OBI requires host network namespace to inject headers in outgoing requests
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      # Only schedule on Linux nodes (OBI requires eBPF which is Linux-only)
+      nodeSelector:
+        kubernetes.io/os: linux
+      {{- with .Values.obi.nodeSelector }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.obi.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.obi.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: obi
+          image: {{ include "splunk-otel-collector.image.obi" . }}
+          imagePullPolicy: {{ .Values.obi.image.pullPolicy }}
+          command: ["/ebpf-instrument", "--config=/config/obi-config.yml"]
+          terminationMessagePolicy: FallbackToLogsOnError
+          {{- with .Values.obi.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- include "splunk-otel-collector.securityContext" (dict "securityContext" .Values.obi.securityContext "isWindows" false "setRunAsUser" true) | nindent 12 }}
+          volumeMounts:
+            # Mount cgroup filesystem for kernel instrumentation
+            - name: cgroup
+              mountPath: /sys/fs/cgroup
+              readOnly: true
+            # Mount OBI configuration
+            - name: obi-config
+              mountPath: /config
+              readOnly: true
+          env:
+            # Set the cluster name for all instrumentation data
+            - name: OTEL_EBPF_KUBE_CLUSTER_NAME
+              value: {{ .Values.clusterName | quote }}
+            # Set the OTLP endpoint for telemetry export
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ include "splunk-otel-collector.obiOtlpEndpoint" . | quote }}
+            {{- range $key, $value := .Values.obi.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+      volumes:
+        # Mount the cgroup filesystem from the host
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+        # Mount OBI configuration from ConfigMap
+        - name: obi-config
+          configMap:
+            name: {{ include "splunk-otel-collector.obiFullname" . }}-config
+{{- end }}

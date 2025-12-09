@@ -1,0 +1,31 @@
+{{- if and .Values.rbac.create (include "splunk-otel-collector.obiEnabled" .) }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "splunk-otel-collector.obiClusterRoleName" . }}
+  labels:
+    {{- include "splunk-otel-collector.obiLabels" . | nindent 4 }}
+rules:
+  # Read access to cluster resources for service discovery
+  - apiGroups: [""]
+    resources: ["namespaces", "nodes", "pods"]
+    verbs: ["get", "watch", "list"]
+  # Read access to services for network policy integration
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "watch", "list"]
+  # Read access to workload owners for identifying service relationships
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["replicationcontrollers"]
+    verbs: ["get", "list", "watch"]
+  # Permission to manage seccomp profiles when integrated with Kubernetes Security Profiles Operator
+  - apiGroups: ["security-profiles-operator.x-k8s.io"]
+    resources: ["seccompprofiles"]
+    verbs: ["list", "watch", "create"]
+{{- end }}

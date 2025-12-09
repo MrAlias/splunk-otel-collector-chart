@@ -413,3 +413,92 @@ If distribution is eks/auto-mode and hostNetwork is not explicitly set, it will 
 {{- $useOldService := and (hasKey $values "service") (gt (len $values.service) 0) }}
 {{- toYaml (ternary $values.service $svc $useOldService) -}}
 {{- end -}}
+
+{{/*
+Whether OBI (OpenTelemetry eBPF Instrumentation) should be enabled.
+OBI is not supported on eks/fargate and gke/autopilot distributions.
+*/}}
+{{- define "splunk-otel-collector.obiEnabled" -}}
+{{- and .Values.obi.enabled (not (or (eq .Values.distribution "eks/fargate") (eq .Values.distribution "gke/autopilot"))) }}
+{{- end -}}
+
+{{/*
+Create the name of the OBI daemonset and related resources
+*/}}
+{{- define "splunk-otel-collector.obiFullname" -}}
+{{- printf "%s-obi" ( include "splunk-otel-collector.fullname" . ) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Create the name of the OBI service account to use
+*/}}
+{{- define "splunk-otel-collector.obiServiceAccountName" -}}
+{{- default (include "splunk-otel-collector.obiFullname" .) .Values.obi.serviceAccount.name -}}
+{{- end -}}
+
+{{/*
+Create the name of the OBI namespace-scoped Role
+*/}}
+{{- define "splunk-otel-collector.obiRoleName" -}}
+{{- printf "%s-role" ( include "splunk-otel-collector.obiFullname" . ) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Create the name of the OBI RoleBinding
+*/}}
+{{- define "splunk-otel-collector.obiRoleBindingName" -}}
+{{- printf "%s-rolebinding" ( include "splunk-otel-collector.obiFullname" . ) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Create the name of the OBI cluster role
+*/}}
+{{- define "splunk-otel-collector.obiClusterRoleName" -}}
+{{- printf "%s-clusterRole" ( include "splunk-otel-collector.obiFullname" . ) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Create the name of the OBI cluster role binding
+*/}}
+{{- define "splunk-otel-collector.obiClusterRoleBindingName" -}}
+{{- printf "%s-clusterRoleBinding" ( include "splunk-otel-collector.obiFullname" . ) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Create the OBI image name.
+*/}}
+{{- define "splunk-otel-collector.image.obi" -}}
+{{- if .Values.obi.image.tag }}
+{{- printf "%s:%s" .Values.obi.image.repository .Values.obi.image.tag }}
+{{- else }}
+{{- printf "%s:latest" .Values.obi.image.repository }}
+{{- end }}
+{{- end -}}
+
+{{/*
+Common labels for OBI resources.
+*/}}
+{{- define "splunk-otel-collector.obiLabels" -}}
+{{- include "splunk-otel-collector.commonLabels" . }}
+component: obi
+{{- end -}}
+
+{{/*
+Selector labels for OBI resources.
+*/}}
+{{- define "splunk-otel-collector.obiSelectorLabels" -}}
+app: {{ include "splunk-otel-collector.obiFullname" . }}
+{{- end -}}
+
+{{/*
+Create the OTLP endpoint for OBI to send telemetry.
+Prefers gateway if available, otherwise uses agent.
+Returns the endpoint URL.
+*/}}
+{{- define "splunk-otel-collector.obiOtlpEndpoint" -}}
+{{- if .Values.gateway.enabled }}
+http://{{ include "splunk-otel-collector.gatewayServiceName" . }}:4318
+{{- else }}
+http://{{ include "splunk-otel-collector.fullname" . }}-agent:4318
+{{- end }}
+{{- end -}}

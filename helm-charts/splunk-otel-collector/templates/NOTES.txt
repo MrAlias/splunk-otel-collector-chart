@@ -44,3 +44,19 @@ Splunk OpenTelemetry Collector is installed and configured to send data to Splun
 {{- fail (printf "ERROR: Deprecated instrumentation configuration detected, the following %s is no longer supported under instrumentation. Please migrate to instrumentation.spec.*. See https://github.com/signalfx/splunk-otel-collector-chart/blob/main/UPGRADING.md#01280-to-01290 for details." $instrKeys) }}
 {{- end }}
 {{- end }}
+
+{{- if include "splunk-otel-collector.obiEnabled" . }}
+[INFO] OpenTelemetry eBPF Instrumentation (OBI) is enabled!
+  - OBI automatically instruments your applications with eBPF to emit distributed traces, metrics, and RED metrics without code changes or restarts.
+  - Prerequisites: Linux kernel 4.x+ with eBPF support, privileged containers allowed.
+  - OBI data is sent to: {{ include "splunk-otel-collector.obiOtlpEndpoint" . }}
+{{- if not .Values.clusterName }}
+[WARNING] clusterName is not set! OBI traces will not have cluster identity. Please set clusterName in your values.
+{{- end }}
+{{- if and (not .Values.gateway.enabled) (not .Values.agent.enabled) }}
+{{- fail "ERROR: OBI is enabled but neither gateway nor agent is enabled! Please enable either gateway (gateway.enabled=true) or agent (agent.enabled=true) to route OBI telemetry." }}
+{{- end }}
+{{- if and (not .Values.gateway.enabled) (not .Values.agent.enabled) }}
+{{- fail "ERROR: OBI telemetry routing not configured! Please enable either the gateway (gateway.enabled=true) or agent (agent.enabled=true) to receive and forward OBI data." }}
+{{- end }}
+{{- end }}
