@@ -18,9 +18,9 @@ spec:
     metadata:
       labels:
         {{- include "splunk-otel-collector.obiSelectorLabels" . | nindent 8 }}
-      {{- with .Values.obi.podAnnotations }}
+      {{- if .Values.obi.podAnnotations }}
       annotations:
-        {{- toYaml . | nindent 8 }}
+        {{- toYaml .Values.obi.podAnnotations | nindent 8 }}
       {{- end }}
     spec:
       serviceAccountName: {{ include "splunk-otel-collector.obiServiceAccountName" . }}
@@ -32,12 +32,12 @@ spec:
       # Only schedule on Linux nodes (OBI requires eBPF which is Linux-only)
       nodeSelector:
         kubernetes.io/os: linux
-      {{- with .Values.obi.nodeSelector }}
-        {{- toYaml . | nindent 8 }}
+      {{- if .Values.obi.nodeSelector }}
+        {{- toYaml .Values.obi.nodeSelector | nindent 8 }}
       {{- end }}
-      {{- with .Values.obi.affinity }}
+      {{- if .Values.obi.affinity }}
       affinity:
-        {{- toYaml . | nindent 8 }}
+        {{- toYaml .Values.obi.affinity | nindent 8 }}
       {{- end }}
       {{- with .Values.obi.tolerations }}
       tolerations:
@@ -71,7 +71,7 @@ spec:
               value: {{ .Values.clusterName | quote }}
             # Set the OTLP endpoint for telemetry export
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: {{ include "splunk-otel-collector.obiOtlpEndpoint" . | quote }}
+              value: {{ include "splunk-otel-collector.obiOtlpEndpoint" . | trim | quote }}
             {{- range $key, $value := .Values.obi.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}

@@ -433,7 +433,11 @@ Create the name of the OBI daemonset and related resources
 Create the name of the OBI service account to use
 */}}
 {{- define "splunk-otel-collector.obiServiceAccountName" -}}
-{{- default (include "splunk-otel-collector.obiFullname" .) .Values.obi.serviceAccount.name -}}
+{{- if and .Values.obi.serviceAccount .Values.obi.serviceAccount.name -}}
+{{- .Values.obi.serviceAccount.name -}}
+{{- else -}}
+{{- include "splunk-otel-collector.obiFullname" . -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -496,9 +500,9 @@ Prefers gateway if available, otherwise uses agent.
 Returns the endpoint URL.
 */}}
 {{- define "splunk-otel-collector.obiOtlpEndpoint" -}}
-{{- if .Values.gateway.enabled }}
+{{- if .Values.gateway.enabled -}}
 http://{{ include "splunk-otel-collector.gatewayServiceName" . }}:4318
-{{- else }}
+{{- else -}}
 http://{{ include "splunk-otel-collector.fullname" . }}-agent:4318
-{{- end }}
+{{- end -}}
 {{- end -}}

@@ -1,0 +1,59 @@
+# Example to enable OpenTelemetry eBPF Instrumentation (OBI) with minimal collector overhead
+# This configuration disables default collector telemetry (host metrics, kubelet stats, logs)
+# to show ONLY telemetry data collected by OBI
+
+# Required: Cluster name for telemetry identification
+clusterName: my-cluster
+
+# Splunk Observability configuration
+splunkObservability:
+  realm: us0
+  accessToken: ${SPLUNK_ACCESS_TOKEN}
+  # Enable traces and metrics for OBI data
+  tracesEnabled: true
+  metricsEnabled: true
+
+# Enable gateway-only deployment
+gateway:
+  enabled: true
+
+# Disable the local agent and clusterReceiver so everything flows through the gateway
+agent:
+  enabled: false
+
+clusterReceiver:
+  enabled: false
+
+# Disable logs collection entirely
+logsCollection:
+  containers:
+    enabled: false
+  journald:
+    enabled: false
+
+# Disable cluster receiver (K8s cluster metrics and events)
+clusterReceiver:
+  enabled: false
+
+# Enable OpenTelemetry eBPF Instrumentation
+# OBI automatically instruments applications with eBPF for distributed traces and RED metrics
+obi:
+  enabled: true
+  image:
+    repository: otel/ebpf-instrument
+    # tag: "v0.3.0"  # Uncomment to pin to a specific version (recommended for production)
+    # Empty tag defaults to latest
+
+  # Resource configuration for OBI daemonset
+  # Note: OBI memory usage scales with the number of instrumented processes and services
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+  # OBI-specific environment variables
+  env:
+    OTEL_EBPF_OTLP_TRACES_MAX_QUEUE_SIZE: 512

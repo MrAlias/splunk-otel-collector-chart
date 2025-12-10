@@ -1218,8 +1218,32 @@ obi:
     OTEL_EBPF_METRICS_INTERVAL: "30s"
     # Route harvester timeout
     OTEL_EBPF_ROUTE_HARVESTER_TIMEOUT: "10s"
+    # OTLP export queue settings (can be customized to handle high trace volume):
+    # - OTEL_EBPF_OTLP_TRACES_QUEUE_SIZE: Size of the export queue (default depends on OBI version)
+    # - OTEL_EBPF_OTLP_TRACES_BATCH_SIZE: Number of spans per batch (default depends on OBI version)
+    # Example for high-traffic clusters:
+    #   OTEL_EBPF_OTLP_TRACES_QUEUE_SIZE: "10000"
+    #   OTEL_EBPF_OTLP_TRACES_BATCH_SIZE: "2048"
+    #   OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT: "30s"
     # Additional custom environment variables can be added here
     # CUSTOM_VAR: "value"
+
+  # Service account for OBI
+  serviceAccount:
+    # The name of the service account to use.
+    # If not set, a name is generated using the obiFullname template
+    name: ""
+    # Service account annotations
+    annotations: {}
+
+  # OBI pod annotations
+  podAnnotations: {}
+
+  # Node selector for OBI pods
+  nodeSelector: {}
+
+  # Affinity for OBI pods
+  affinity: {}
 
 ################################################################################
 # Helm Chart Feature Gates.

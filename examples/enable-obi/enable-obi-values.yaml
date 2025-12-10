@@ -22,10 +22,11 @@ obi:
     # tag: "v0.3.0"  # Uncomment to pin to a specific version (recommended for production)
     # Empty tag defaults to latest
   # Resource configuration for OBI daemonset
+  # Note: OBI memory usage scales with the number of instrumented processes and services
   resources:
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: 1000m
+      memory: 2Gi
     requests:
-      cpu: 200m
-      memory: 256Mi
+      cpu: 500m
+      memory: 1Gi
