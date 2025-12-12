@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend-service
+  template:
+    metadata:
+      name: frontend-service
+      labels:
+        app: frontend-service
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - image: quay.io/splunko11ytest/python_distributed_frontend:latest
+          name: frontend-service
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: BACKEND_SERVICES
+              value: "http://java-backend:8080,http://dotnet-backend:8080,http://nodejs-backend:8080,http://go-backend:8080"
+            - name: CALL_INTERVAL_SECONDS
+              value: "5"
+      nodeSelector:
+        kubernetes.io/os: "linux"

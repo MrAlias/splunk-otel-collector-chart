@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: java-backend
+  labels:
+    app: java-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: java-backend
+  template:
+    metadata:
+      labels:
+        app: java-backend
+      name: java-backend
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - image: distributed-trace-test-java:latest
+          name: java-backend
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SERVER_PORT
+              value: "8080"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 2
+      nodeSelector:
+        kubernetes.io/os: "linux"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: java-backend
+  labels:
+    app: java-backend
+spec:
+  selector:
+    app: java-backend
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

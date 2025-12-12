@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dotnet-backend
+  labels:
+    app: dotnet-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dotnet-backend
+  template:
+    metadata:
+      labels:
+        app: dotnet-backend
+      name: dotnet-backend
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - image: distributed-trace-test-dotnet:latest
+          name: dotnet-backend
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SERVER_PORT
+              value: "8080"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 2
+      nodeSelector:
+        kubernetes.io/os: "linux"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dotnet-backend
+  labels:
+    app: dotnet-backend
+spec:
+  selector:
+    app: dotnet-backend
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
