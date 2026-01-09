@@ -471,7 +471,7 @@ func Test_OBI_Distributed_Tracing_Circular_Chain(t *testing.T) {
 		cppApp:    newApp("cpp", "manifest.yaml"),
 		rustApp:   newApp("rust", "manifest.yaml"),
 
-		curlApp: newApp("distributed-tracing", "test-initiator.yaml"),
+		curlApp: newApp("curl", "manifest.yaml"),
 	}
 
 	if os.Getenv("TEARDOWN_BEFORE_SETUP") == "true" {
