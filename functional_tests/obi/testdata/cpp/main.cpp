@@ -61,6 +61,8 @@ public:
     
 private:
     void handle_request(int client_socket) {
+        // Read the entire request including headers and body
+        std::string request;
         char buffer[BUFFER_SIZE] = {0};
         int bytes_read = read(client_socket, buffer, BUFFER_SIZE - 1);
         
@@ -69,7 +71,40 @@ private:
             return;
         }
         
-        std::string request(buffer);
+        request.append(buffer, bytes_read);
+        
+        // Parse headers to get Content-Length
+        size_t header_end = request.find("\r\n\r\n");
+        if (header_end == std::string::npos) {
+            send_response(client_socket, 400, "Invalid request format");
+            return;
+        }
+        
+        std::string headers_str = request.substr(0, header_end);
+        int content_length = 0;
+        size_t cl_pos = headers_str.find("Content-Length:");
+        if (cl_pos != std::string::npos) {
+            size_t cl_end = headers_str.find("\r\n", cl_pos);
+            std::string cl_value = headers_str.substr(cl_pos + 15, cl_end - (cl_pos + 15));
+            // Trim whitespace
+            cl_value.erase(0, cl_value.find_first_not_of(" \t"));
+            cl_value.erase(cl_value.find_last_not_of(" \t") + 1);
+            content_length = std::atoi(cl_value.c_str());
+        }
+        
+        // Read remaining body if needed
+        size_t body_start = header_end + 4;
+        int current_body_size = request.size() - body_start;
+        
+        while (current_body_size < content_length) {
+            memset(buffer, 0, sizeof(buffer));
+            bytes_read = read(client_socket, buffer, BUFFER_SIZE - 1);
+            if (bytes_read <= 0) {
+                break;
+            }
+            request.append(buffer, bytes_read);
+            current_body_size += bytes_read;
+        }
         
         if (request.find("GET /health") == 0) {
             handle_health(client_socket);
@@ -229,13 +264,20 @@ private:
         std::string response;
         char buffer[BUFFER_SIZE] = {0};
         int bytes_read = 0;
+        int total_bytes = 0;
         while ((bytes_read = read(sock, buffer, BUFFER_SIZE - 1)) > 0) {
             response.append(buffer, bytes_read);
+            total_bytes += bytes_read;
             memset(buffer, 0, sizeof(buffer));
         }
         close(sock);
 
-        if (response.empty()) return false;
+        std::cerr << "Received response of " << total_bytes << " bytes\n";
+
+        if (response.empty()) {
+            std::cerr << "Empty response from upstream\n";
+            return false;
+        }
 
         // Extract status code
         int status_code = 200;
@@ -248,10 +290,21 @@ private:
         size_t body_start = response.find("\r\n\r\n");
         if (body_start != std::string::npos) {
             std::string response_body = response.substr(body_start + 4);
-            send_response(client_socket, status_code, response_body);
-            return true;
+            std::cerr << "Extracted body: " << response_body.length() << " bytes\n";
+            // Validate the response body is not empty
+            if (!response_body.empty() && response_body[0] != '\0') {
+                send_response(client_socket, status_code, response_body);
+                return true;
+            }
         }
 
+        std::cerr << "Failed to extract valid body from response\n";
+        // If we couldn't extract a valid body, return an error
+        json error_response;
+        error_response["service"] = SERVICE_NAME;
+        error_response["status"] = 502;
+        error_response["error"] = "Empty or invalid response from upstream service";
+        send_response(client_socket, 502, error_response.dump());
         return false;
     }
     
