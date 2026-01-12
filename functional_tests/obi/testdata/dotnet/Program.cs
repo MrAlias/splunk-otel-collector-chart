@@ -3,11 +3,16 @@ using System.Text.Json;
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHttpClient();
 
+builder.WebHost.ConfigureKestrel(serverOptions =>
+{
+    serverOptions.AllowSynchronousIO = true;
+});
+
 var app = builder.Build();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
-app.MapPost("/chain", async (HttpContext context, IHttpClientFactory httpClientFactory) =>
+app.MapPost("/chain", async (HttpContext context, HttpClient httpClient) =>
 {
     try
     {
@@ -66,37 +71,17 @@ app.MapPost("/chain", async (HttpContext context, IHttpClientFactory httpClientF
             var nextReq = new { targets = remainingTargets };
             var nextReqJson = JsonSerializer.Serialize(nextReq);
 
-            var client = httpClientFactory.CreateClient();
-            client.Timeout = TimeSpan.FromSeconds(10);
+            httpClient.Timeout = TimeSpan.FromSeconds(10);
 
             var chainUrl = $"http://{nextTarget}/chain";
 
-            // Build HttpRequestMessage to add headers
+            // Build HttpRequestMessage
             var message = new HttpRequestMessage(HttpMethod.Post, chainUrl)
             {
                 Content = new StringContent(nextReqJson, System.Text.Encoding.UTF8, "application/json")
             };
 
-            // Forward trace headers
-            string[] traceHeaders = new [] {
-                "traceparent", "tracestate",
-                "b3", "x-b3-traceid", "x-b3-spanid", "x-b3-sampled",
-                "x-ot-span-context"
-            };
-            foreach (var h in traceHeaders)
-            {
-                if (context.Request.Headers.TryGetValue(h, out var val))
-                {
-                    // Some headers are restricted on HttpRequestMessage.Headers; add to content if needed
-                    if (!message.Headers.TryAddWithoutValidation(h, (IEnumerable<string>)val))
-                    {
-                        message.Content.Headers.Remove(h);
-                        message.Content.Headers.TryAddWithoutValidation(h, (IEnumerable<string>)val);
-                    }
-                }
-            }
-
-            var response = await client.SendAsync(message);
+            var response = await httpClient.SendAsync(message);
 
             var responseContent = await response.Content.ReadAsStringAsync();
             context.Response.ContentType = "application/json";

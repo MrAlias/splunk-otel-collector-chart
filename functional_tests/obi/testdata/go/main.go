@@ -29,20 +29,6 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
-var traceHeaders = []string{
-	"traceparent", "tracestate",
-	"b3", "x-b3-traceid", "x-b3-spanid", "x-b3-sampled",
-	"x-ot-span-context",
-}
-
-func copyTraceHeaders(from *http.Request, to *http.Request) {
-	for _, h := range traceHeaders {
-		if v := from.Header.Get(h); v != "" {
-			to.Header.Set(h, v)
-		}
-	}
-}
-
 func handleChain(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Content-Type", "application/json")
@@ -104,7 +90,6 @@ func handleChain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqOut.Header.Set("Content-Type", "application/json")
-	copyTraceHeaders(r, reqOut)
 
 	resp, err := client.Do(reqOut)
 	if err != nil {

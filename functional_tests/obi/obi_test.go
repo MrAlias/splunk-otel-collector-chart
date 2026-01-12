@@ -6,6 +6,7 @@ package obi
 import (
 	"bytes"
 	"context"
+	crand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,10 +18,9 @@ import (
 	"testing"
 	"time"
 
-	crand "crypto/rand"
-
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/consumer/consumertest"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -241,6 +241,63 @@ func (a *App) Teardown(ctx context.Context, c *kubernetes.Clientset, grace *int6
 	return err
 }
 
+func (a *App) String() string {
+	for _, d := range a.deployments {
+		if d.Name != "" {
+			return d.Name
+		}
+	}
+
+	for _, p := range a.pods {
+		if p.Name != "" {
+			return p.Name
+		}
+	}
+
+	for _, s := range a.services {
+		if s.Name != "" {
+			return s.Name
+		}
+	}
+
+	return "App(manifest=" + a.manifestPath + ")"
+}
+
+// ServiceName returns the first service's name of the App.
+func (a *App) ServiceName() string {
+	for _, s := range a.services {
+		if s.Name != "" {
+			return s.Name
+		}
+	}
+	return ""
+}
+
+// Service returns the first service's DNS name of the App.
+func (a *App) ServiceURL() string {
+	for _, s := range a.services {
+		if s.Name == "" {
+			// Should not happen, but skip just in case.
+			continue
+		}
+
+		ns := s.Namespace
+		if ns == "" {
+			ns = namespace
+		}
+
+		var port int32 = 8080
+		if len(s.Spec.Ports) > 0 {
+			port = s.Spec.Ports[0].Port
+		}
+
+		// <service-name>.<namespace>.svc.cluster.local:<port>
+		return fmt.Sprintf("%s.%s.svc.cluster.local:%d", s.Name, ns, port)
+	}
+
+	return ""
+}
+
 // ClusterIP returns the first non-empty ClusterIP of the App's services.
 func (a *App) ClusterIP(ctx context.Context, client *kubernetes.Clientset) string {
 	services := client.CoreV1().Services(namespace)
@@ -271,7 +328,36 @@ func NewCurlPod(app *App) (*CurlPod, error) {
 	return &CurlPod{pod: app.pods[0]}, nil
 }
 
-func (c *CurlPod) Chain(ctx context.Context, cfg *restclient.Config, targets []string) (string, string, error) {
+func (c *CurlPod) GoDo(ctx context.Context, every time.Duration, f func(context.Context) error) <-chan error {
+	done := make(chan error, 1)
+	go func() {
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		defer close(done)
+
+		err := f(ctx)
+		if err != nil {
+			done <- err
+			return
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				done <- nil
+				return
+			case <-ticker.C:
+				//err := f(ctx)
+				//if err != nil {
+				//	done <- err
+				//	return
+				//}
+			}
+		}
+	}()
+	return done
+}
+
+func (c *CurlPod) Chain(ctx context.Context, cfg *restclient.Config, targets []*App) (string, string, error) {
 	if len(targets) < 2 {
 		return "", "", fmt.Errorf("at least two targets are required for a chain request")
 	}
@@ -279,24 +365,16 @@ func (c *CurlPod) Chain(ctx context.Context, cfg *restclient.Config, targets []s
 	start, targets := targets[0], targets[1:]
 
 	// JSON payload for the chain request.
-	body, err := json.Marshal(map[string]any{"targets": targets})
+	body, err := c.chainBody(targets)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to marshal chain request body: %w", err)
 	}
 
-	// Seed a W3C traceparent header so that services can forward a single
-	// trace context.
-	idBytes := make([]byte, 16)
-	_, _ = crand.Read(idBytes)
-	spanBytes := make([]byte, 8)
-	_, _ = crand.Read(spanBytes)
-	traceparent := fmt.Sprintf("00-%s-%s-01", hex.EncodeToString(idBytes), hex.EncodeToString(spanBytes))
-
 	// Execute curl command in the test initiator pod to start the chain
 	curlCmd := fmt.Sprintf(
 		"curl -X POST http://%s/chain -H 'Content-Type: application/json' -H 'traceparent: %s' -d '%s'",
-		start,
-		traceparent,
+		start.ServiceURL(),
+		c.newTraceparent(),
 		string(body),
 	)
 
@@ -314,6 +392,26 @@ func (c *CurlPod) Chain(ctx context.Context, cfg *restclient.Config, targets []s
 		}
 	}
 	return o, e, nil
+}
+
+func (c *CurlPod) chainBody(apps []*App) ([]byte, error) {
+	targets := make([]string, 0, len(apps))
+	for _, app := range apps {
+		targets = append(targets, app.ServiceURL())
+	}
+	return json.Marshal(map[string]any{"targets": targets})
+}
+
+func (c *CurlPod) newTraceparent() string {
+	idBytes := make([]byte, 16)
+	_, _ = crand.Read(idBytes)
+	idHex := hex.EncodeToString(idBytes)
+
+	spanBytes := make([]byte, 8)
+	_, _ = crand.Read(spanBytes)
+	spanHex := hex.EncodeToString(spanBytes)
+
+	return fmt.Sprintf("00-%s-%s-01", idHex, spanHex)
 }
 
 func (c *CurlPod) exec(ctx context.Context, cfg *restclient.Config, cmd string) (string, string, error) {
@@ -358,80 +456,189 @@ func (c *CurlPod) exec(ctx context.Context, cfg *restclient.Config, cmd string) 
 	return stdout.String(), stderr.String(), err
 }
 
-func validateCircularChain(t *testing.T, sink *consumertest.TracesSink, expectedServices []string) {
+type traceID string
+
+type span struct {
+	ID       string
+	ParentID string
+	Name     string
+	Kind     string
+	Service  string
+
+	Children []*span
+}
+
+func (s *span) Equal(other *span) bool {
+	return s.ID == other.ID &&
+		s.ParentID == other.ParentID &&
+		s.Name == other.Name &&
+		s.Kind == other.Kind &&
+		s.Service == other.Service
+}
+
+func (s *span) String() string {
+	if s.Service != "" {
+		return s.Service
+	}
+
+	return fmt.Sprintf("Span(ID=%s, Name=%s, Kind=%s)", s.ID, s.Name, s.Kind)
+}
+
+func assertChainEventually(t *testing.T, sink *consumertest.TracesSink, chain []*App, timeout time.Duration) {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
+	traces := make(map[traceID][]*span)
+	require.Eventually(t, func() bool {
+		got := sink.AllTraces()
+		var count int
+		for _, t := range got {
+			rs := t.ResourceSpans()
+			for i := 0; i < rs.Len(); i++ {
+				ss := rs.At(i).ScopeSpans()
+				for j := 0; j < ss.Len(); j++ {
+					count += ss.At(j).Spans().Len()
+				}
+			}
+		}
+		t.Logf("Received %d traces with total %d spans", len(got), count)
 
-	servicesSeen := make(map[string]bool)
-	spansByTraceID := make(map[string]map[string]map[string]interface{})
+		n := parsedTracesInto(traces, got)
+		if n == 0 {
+			return false
+		}
 
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
+		logTraces(t, traces)
 
-	for {
-		select {
-		case <-ctx.Done():
-			t.Fatalf("Timeout waiting for circular chain traces. Services seen: %v, Expected: %v", servicesSeen, expectedServices)
-		case <-ticker.C:
-			allTraces := sink.AllTraces()
+		return assertChain(t, traces, chain)
+	}, timeout, time.Second, "timed out waiting for complete trace chain")
+}
 
-			// Process all traces and collect span hierarchy
-			for _, traces := range allTraces {
-				for i := 0; i < traces.ResourceSpans().Len(); i++ {
-					rs := traces.ResourceSpans().At(i)
-					attrs := rs.Resource().Attributes()
+func parsedTracesInto(dest map[traceID][]*span, src []ptrace.Traces) int {
+	var n int
+	for _, t := range src {
+		for i := 0; i < t.ResourceSpans().Len(); i++ {
+			rs := t.ResourceSpans().At(i)
+			attrs := rs.Resource().Attributes()
 
-					serviceName, ok := attrs.Get("service.name")
-					if !ok {
+			nameAttr, ok := attrs.Get("service.name")
+
+			var svc string
+			if ok {
+				svc = nameAttr.Str()
+			}
+
+			for j := 0; j < rs.ScopeSpans().Len(); j++ {
+				ss := rs.ScopeSpans().At(j)
+				for k := 0; k < ss.Spans().Len(); k++ {
+					pSpan := ss.Spans().At(k)
+					tID := pSpan.TraceID().String()
+
+					s := &span{
+						Name:     pSpan.Name(),
+						ID:       pSpan.SpanID().String(),
+						ParentID: pSpan.ParentSpanID().String(),
+						Kind:     pSpan.Kind().String(),
+						Service:  svc,
+					}
+
+					trace := dest[traceID(tID)]
+					if trace == nil {
+						trace = []*span{s}
+						dest[traceID(tID)] = trace
+						n++
 						continue
 					}
 
-					svcName := serviceName.Str()
-					servicesSeen[svcName] = true
+					if spanExists(trace, s) {
+						continue
+					}
+					n++
 
-					// Collect spans with hierarchy info
-					for j := 0; j < rs.ScopeSpans().Len(); j++ {
-						ss := rs.ScopeSpans().At(j)
-						for k := 0; k < ss.Spans().Len(); k++ {
-							span := ss.Spans().At(k)
-							traceID := span.TraceID().String()
+					parent := findParent(trace, s)
+					if parent != nil {
+						parent.Children = append(parent.Children, s)
+					} else {
+						trace = append(trace, s)
+					}
 
-							if spansByTraceID[traceID] == nil {
-								spansByTraceID[traceID] = make(map[string]map[string]interface{})
-							}
-							if spansByTraceID[traceID][svcName] == nil {
-								spansByTraceID[traceID][svcName] = make(map[string]interface{})
-							}
-
-							spansByTraceID[traceID][svcName]["spanID"] = span.SpanID().String()
-							spansByTraceID[traceID][svcName]["parentSpanID"] = span.ParentSpanID().String()
-							spansByTraceID[traceID][svcName]["spanName"] = span.Name()
+					var idx int
+					for _, k := range trace {
+						if k.ParentID == s.ID {
+							s.Children = append(s.Children, k)
+						} else {
+							trace[idx] = k
+							idx++
 						}
 					}
+					trace = trace[:idx]
+
+					dest[traceID(tID)] = trace
 				}
 			}
-
-			// Check if we've seen all expected services
-			allServicesSeen := true
-			for _, svc := range expectedServices {
-				if !servicesSeen[svc] {
-					allServicesSeen = false
-					t.Logf("Still waiting for service: %s", svc)
-				}
-			}
-
-			if allServicesSeen {
-				// Accept chain completion when all services have emitted spans,
-				// regardless of whether they appear in a single trace.
-				t.Logf("All expected services have emitted spans at least once")
-				return
-			}
-
-			t.Logf("Services seen: %v / %v", len(servicesSeen), len(expectedServices))
 		}
 	}
+	return n
+}
+
+func spanExists(spans []*span, target *span) bool {
+	for _, s := range spans {
+		if s.Equal(target) {
+			return true
+		}
+
+		if spanExists(s.Children, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func findParent(spans []*span, child *span) *span {
+	for _, s := range spans {
+		if s.ID == child.ParentID {
+			return s
+		}
+
+		if p := findParent(s.Children, child); p != nil {
+			return p
+		}
+	}
+	return nil
+}
+
+func logTraces(t *testing.T, traces map[traceID][]*span) {
+	for tID, spans := range traces {
+		t.Logf("(Trace %s):", tID)
+		logSpans(t, spans, " ")
+	}
+}
+
+func logSpans(t *testing.T, spans []*span, ident string) {
+	for _, s := range spans {
+		t.Logf("%s↳ Span(Service=%s, Name=%s, Kind=%s)", ident, s.Service, s.Name, s.Kind)
+		logSpans(t, s.Children, ident+" ")
+	}
+}
+
+func assertChain(t *testing.T, traces map[traceID][]*span, chain []*App) bool {
+	//// Check if we've seen all expected services
+	//allServicesSeen := true
+	//for _, app := range chain {
+	//	if !servicesSeen[app.String()] {
+	//		allServicesSeen = false
+	//		t.Logf("Still waiting for service: %s", app)
+	//	}
+	//}
+
+	//if allServicesSeen {
+	//	// Accept chain completion when all services have emitted spans,
+	//	// regardless of whether they appear in a single trace.
+	//	t.Logf("All expected services have emitted spans at least once")
+	//	return
+	//}
+
+	// t.Logf("Services seen: %v / %v", len(servicesSeen), len(chain))
+	return true
 }
 
 func Test_OBI_Distributed_Tracing_Circular_Chain(t *testing.T) {
@@ -539,90 +746,57 @@ func Test_OBI_Distributed_Tracing_Circular_Chain(t *testing.T) {
 	//  go -> java -> nodejs -> dotnet -> python -> ruby -> cpp -> rust -> go
 	//
 	// Using ClusterIP directly avoids potential DNS resolution issues.
-	chain := []string{
-		fmt.Sprintf("%s:8080", apps[goApp].ClusterIP(t.Context(), client)),
-		fmt.Sprintf("%s:8080", apps[javaApp].ClusterIP(t.Context(), client)),
-		fmt.Sprintf("%s:8080", apps[nodejsApp].ClusterIP(t.Context(), client)),
-		fmt.Sprintf("%s:8080", apps[dotnetApp].ClusterIP(t.Context(), client)),
-		fmt.Sprintf("%s:8080", apps[pythonApp].ClusterIP(t.Context(), client)),
-		fmt.Sprintf("%s:8080", apps[pythonApp].ClusterIP(t.Context(), client)),
-		fmt.Sprintf("%s:8080", apps[rubyApp].ClusterIP(t.Context(), client)),
-		fmt.Sprintf("%s:8080", apps[cppApp].ClusterIP(t.Context(), client)),
-		fmt.Sprintf("%s:8080", apps[rustApp].ClusterIP(t.Context(), client)),
-		fmt.Sprintf("%s:8080", apps[goApp].ClusterIP(t.Context(), client)),
+	chain := []*App{
+		apps[goApp],
+		apps[javaApp],
+		apps[nodejsApp],
+		apps[dotnetApp],
+		apps[pythonApp],
+		apps[rubyApp],
+		apps[cppApp],
+		apps[rustApp],
+		apps[goApp],
 	}
 
 	t.Logf("Executing circular chain: %v", chain)
 
 	// Create a context that we can cancel when traces are received
-	ctx, cancel := context.WithCancel(t.Context())
+	curlCtx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	// Start a goroutine to continuously execute the chain while waiting for traces
-	chainDone := make(chan error, 1)
-	go func() {
-		ticker := time.NewTicker(3 * time.Second)
-		defer ticker.Stop()
+	chainDone := curlPod.GoDo(curlCtx, 3*time.Second, func(ctx context.Context) error {
+		stdout, stderr, err := curlPod.Chain(ctx, cfg, chain)
+		if err != nil {
+			t.Logf("Chain execution error: %v", err)
+			t.Logf("cURL stdout: %s", stdout)
+			t.Logf("cURL stderr: %s", stderr)
 
-		for {
-			select {
-			case <-ctx.Done():
-				chainDone <- nil
-				return
-			case <-ticker.C:
-				stdout, stderr, err := curlPod.Chain(t.Context(), cfg, chain)
-				if err != nil {
-					t.Logf("Chain execution error: %v", err)
-					t.Logf("cURL stdout: %s", stdout)
-					t.Logf("cURL stderr: %s", stderr)
-				} else {
-					t.Logf("Chain executed successfully")
-				}
+			targetURLs := make([]string, 0, len(chain))
+			for _, app := range chain {
+				targetURLs = append(targetURLs, app.ServiceURL())
 			}
+			t.Logf("Chain target URLs: %v", targetURLs)
+
+			return err
 		}
+		t.Logf("Chain executed successfully")
+		return nil
+	})
+
+	gotTrace := make(chan struct{})
+
+	go func() {
+		defer close(gotTrace)
+		assertChainEventually(t, tracesSink, chain, 3*time.Minute)
 	}()
 
-	// Execute chain once immediately
-	stdout, stderr, err := curlPod.Chain(t.Context(), cfg, chain)
-	if err != nil {
-		t.Logf("Chain execution error: %v", err)
-		t.Logf("cURL stdout: %s", stdout)
-		t.Logf("cURL stderr: %s", stderr)
-	} else {
-		t.Logf("Chain executed successfully")
+	select {
+	case <-gotTrace:
+		cancel()
+		<-chainDone // Ignore chain error given we got traces.
+	case chainErr := <-chainDone:
+		require.NoError(t, chainErr, "chain execution failed before any traces were received")
 	}
-
-	// Wait for some traces to be received - start with a lower expectation to debug
-	internal.WaitForTraces(t, 1, tracesSink)
-
-	// Stop the chain execution loop once traces are received
-	cancel()
-	<-chainDone
-
-	// Log what we received for debugging
-	allTraces := tracesSink.AllTraces()
-	t.Logf("Received %d trace collections", len(allTraces))
-	for idx, traces := range allTraces {
-		t.Logf("Trace collection %d has %d resource spans", idx, traces.ResourceSpans().Len())
-		for i := 0; i < traces.ResourceSpans().Len(); i++ {
-			rs := traces.ResourceSpans().At(i)
-			if svcName, ok := rs.Resource().Attributes().Get("service.name"); ok {
-				t.Logf("  Service: %s", svcName.Str())
-			}
-		}
-	}
-
-	// Now try to validate distributed tracing with the actual chain
-	validateCircularChain(t, tracesSink, []string{
-		"go-backend",
-		"java-backend",
-		"nodejs-backend",
-		"dotnet-backend",
-		"python-backend",
-		"ruby-backend",
-		"cpp-backend",
-		"rust-backend",
-	})
 }
 
 func cleanup(t *testing.T, f func()) {

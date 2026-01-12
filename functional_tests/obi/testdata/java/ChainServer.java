@@ -84,18 +84,6 @@ public class ChainServer {
                 HttpURLConnection conn = (HttpURLConnection) new URL(chainUrl).openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
-                // Carry forward common distributed tracing headers if present
-                String[] traceHeaders = new String[]{
-                    "traceparent", "tracestate",
-                    "b3", "x-b3-traceid", "x-b3-spanid", "x-b3-sampled",
-                    "x-ot-span-context"
-                };
-                for (String h : traceHeaders) {
-                    String v = exchange.getRequestHeaders().getFirst(h);
-                    if (v != null && !v.isEmpty()) {
-                        conn.setRequestProperty(h, v);
-                    }
-                }
                 conn.setConnectTimeout(10000);
                 conn.setReadTimeout(10000);
                 conn.setDoOutput(true);

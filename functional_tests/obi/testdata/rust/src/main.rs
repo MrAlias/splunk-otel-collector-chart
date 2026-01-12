@@ -78,7 +78,7 @@ async fn handle_chain(
         targets: remaining_targets,
     };
 
-    match make_request(next_target, next_req, &headers).await {
+    match make_request(next_target, next_req).await {
         Ok(response_body) => {
             match serde_json::from_str::<serde_json::Value>(&response_body) {
                 Ok(json_response) => (StatusCode::OK, Json(json_response)).into_response(),
@@ -107,26 +107,11 @@ async fn handle_chain(
     }
 }
 
-async fn make_request(target: &str, data: ChainRequest, in_headers: &HeaderMap) -> Result<String, String> {
+async fn make_request(target: &str, data: ChainRequest) -> Result<String, String> {
     let client = reqwest::Client::new();
     let chain_url = format!("http://{}/chain", target);
 
-    // Forward trace headers
-    let mut req = client.post(&chain_url);
-    let trace_headers = [
-        "traceparent", "tracestate",
-        "b3", "x-b3-traceid", "x-b3-spanid", "x-b3-sampled",
-        "x-ot-span-context",
-    ];
-    for h in trace_headers.iter() {
-        if let Some(val) = in_headers.get(*h) {
-            if let Ok(v) = val.to_str() {
-                req = req.header(*h, v);
-            }
-        }
-    }
-
-    let response = req
+    let response = client.post(&chain_url)
         .json(&data)
         .timeout(std::time::Duration::from_secs(10))
         .send()

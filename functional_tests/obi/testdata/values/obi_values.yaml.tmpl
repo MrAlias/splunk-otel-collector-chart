@@ -24,3 +24,15 @@ agent:
 
 obi:
   enabled: true
+  image:
+    tag: "main"
+  config:
+    data:
+      otel_traces_export:
+        instrumentations:
+          - "http"
+      routes:
+        ignored_patterns:
+          - "/health"
+          - "/ready"
+        unmatched: heuristic

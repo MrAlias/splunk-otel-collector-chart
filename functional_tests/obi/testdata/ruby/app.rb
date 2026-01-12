@@ -61,17 +61,6 @@ server.mount_proc('/chain') do |req, res|
       http.open_timeout = 10
 
       headers = { 'Content-Type' => 'application/json' }
-      # Forward trace headers
-      trace_headers = [
-        'traceparent', 'tracestate',
-        'b3', 'x-b3-traceid', 'x-b3-spanid', 'x-b3-sampled',
-        'x-ot-span-context'
-      ]
-      trace_headers.each do |h|
-        v = req[h]
-        headers[h] = v if v && !v.empty?
-      end
-
       request = Net::HTTP::Post.new(uri.path, headers)
       request.body = JSON.generate(next_req)
 

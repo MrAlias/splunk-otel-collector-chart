@@ -27,12 +27,6 @@ const server = http.createServer(async (req, res) => {
   res.end(JSON.stringify({ error: 'Not found' }));
 });
 
-const traceHeaders = [
-  'traceparent', 'tracestate',
-  'b3', 'x-b3-traceid', 'x-b3-spanid', 'x-b3-sampled',
-  'x-ot-span-context'
-];
-
 async function handleChain(req, res) {
   try {
     // Read request body
@@ -77,17 +71,7 @@ async function handleChain(req, res) {
 
     try {
       const chainUrl = `http://${nextTarget}/chain`;
-
-      // Build headers, forwarding trace context
-      const fwdHeaders = {
-        'Content-Type': 'application/json'
-      };
-      for (const h of traceHeaders) {
-        const v = req.headers[h];
-        if (v) fwdHeaders[h] = v;
-      }
-
-      const response = await makeRequest(chainUrl, nextReq, fwdHeaders);
+      const response = await makeRequest(chainUrl, nextReq);
 
       res.writeHead(response.statusCode);
       res.end(JSON.stringify(response.body));
@@ -124,7 +108,7 @@ function readBody(req) {
   });
 }
 
-function makeRequest(targetUrl, data, headers = {}) {
+function makeRequest(targetUrl, data) {
   return new Promise((resolve, reject) => {
     const parsedUrl = url.parse(targetUrl);
     const postData = JSON.stringify(data);
@@ -134,10 +118,10 @@ function makeRequest(targetUrl, data, headers = {}) {
       port: parsedUrl.port || 80,
       path: parsedUrl.path || '/',
       method: 'POST',
-      headers: Object.assign({
+      headers: {
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(postData)
-      }, headers),
+      },
       timeout: 10000
     };
 
