@@ -4,6 +4,19 @@
 <!-- For unreleased changes, see entries in .chloggen -->
 <!-- next version -->
 
+## [0.147.2] - 2026-03-19
+
+This Splunk OpenTelemetry Collector for Kubernetes release adopts the [Splunk OpenTelemetry Collector v0.147.1](https://github.com/signalfx/splunk-otel-collector/releases/tag/v0.147.1).
+
+### 💡 Enhancements 💡
+
+- `clusterReceiver`: Add feature gate to send Kubernetes entities to Splunk Observability v3/event endpoint ([#2284](https://github.com/signalfx/splunk-otel-collector-chart/pull/2284))
+  When enabled via `featureGates.enableK8sEntities`, the cluster receiver routes
+  Kubernetes entity data (from the k8s_cluster receiver) to the Splunk Observability
+  /v3/event endpoint via otlphttp. Requires Splunk Observability configuration.
+  This feature is experimental and may change or be removed in future releases.
+  
+
 ## [0.147.1] - 2026-03-11
 
 This Splunk OpenTelemetry Collector for Kubernetes release adopts the [Splunk OpenTelemetry Collector v0.147.0](https://github.com/signalfx/splunk-otel-collector/releases/tag/v0.147.0).
