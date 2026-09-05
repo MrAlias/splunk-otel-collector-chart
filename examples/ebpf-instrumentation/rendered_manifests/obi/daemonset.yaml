@@ -6,10 +6,10 @@ metadata:
   name: default-obi
   namespace: default
   labels:
-    helm.sh/chart: obi-0.9.0
+    helm.sh/chart: obi-0.13.0
     app.kubernetes.io/name: obi
     app.kubernetes.io/instance: default
-    app.kubernetes.io/version: "v0.9.0"
+    app.kubernetes.io/version: "v0.12.2"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: obi
     app.kubernetes.io/component: workload
@@ -23,23 +23,25 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/config: 083f890733529a7917f31aa39715a155b084deb9f81e89ac5cbcfbee3ca82df3
+        checksum/config: c9acfa5336e28d81c0f768c1705e5538107143ea4f451eab3b391e5ee942e831
         
       labels:
-        helm.sh/chart: obi-0.9.0
+        helm.sh/chart: obi-0.13.0
         app.kubernetes.io/name: obi
         app.kubernetes.io/instance: default
-        app.kubernetes.io/version: "v0.9.0"
+        app.kubernetes.io/version: "v0.12.2"
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/part-of: obi
         app.kubernetes.io/component: workload
     spec:
       serviceAccountName: default-obi
       hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       initContainers:
       containers:
         - name: ebpf-instrument
-          image: ghcr.io/open-telemetry/opentelemetry-ebpf-instrumentation/ebpf-instrument:v0.9.0
+          image: ghcr.io/open-telemetry/opentelemetry-ebpf-instrumentation/ebpf-instrument:v0.13.0
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
@@ -63,6 +65,11 @@ spec:
           volumeMounts:
             - mountPath: /etc/ebpf-instrument/config
               name: ebpf-instrument-config
+            - mountPath: /sys/fs/cgroup
+              name: cgroup
+              readOnly: true
+            - mountPath: /sys/kernel/tracing
+              name: tracefs
             - mountPath: /sys/kernel/security
               name: kernel-security
               readOnly: true
@@ -80,6 +87,13 @@ spec:
         - name: ebpf-instrument-config
           configMap:
             name: default-obi
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+            type: Directory
+        - name: tracefs
+          hostPath:
+            path: /sys/kernel/tracing
         - hostPath:
             path: /sys/kernel/security
             type: Directory
